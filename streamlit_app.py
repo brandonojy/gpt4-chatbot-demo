@@ -1,40 +1,56 @@
-import altair as alt
-import numpy as np
-import pandas as pd
 import streamlit as st
+from streamlit import session_state as ss
+from openai import OpenAI
+import time
 
-"""
-# Welcome to Streamlit!
+api_key = st.secrets["api_key"]
+client = OpenAI(api_key=api_key)
+st.header('Sozcode Assistant', divider='blue')
+st.caption('This GPT4-enabled app uses private PDF files that contains info about Sozcode courses. It can answers your questions on the courses we hold.')
 
-Edit `/streamlit_app.py` to customize this app to your heart's desire :heart:.
-If you have any questions, checkout our [documentation](https://docs.streamlit.io) and [community
-forums](https://discuss.streamlit.io).
 
-In the meantime, below is an example of what you can do with just a few lines of code:
-"""
+if 'stream' not in ss:
+    ss.stream = None
+if "messages" not in ss:
+    ss.messages = []
 
-num_points = st.slider("Number of points in spiral", 1, 10000, 1100)
-num_turns = st.slider("Number of turns in spiral", 1, 300, 31)
 
-indices = np.linspace(0, 1, num_points)
-theta = 2 * np.pi * num_turns * indices
-radius = indices
+# functions
+def data_streamer():
+    """
+    That stream object in ss.stream needs to be examined in detail to come
+    up with this solution. It is still in beta stage and may change in future releases.
+    """
+    for response in ss.stream:
+        if response.event == 'thread.message.delta':
+            value = response.data.delta.content[0].text.value
+            yield value
+            time.sleep(0.1)
 
-x = radius * np.cos(theta)
-y = radius * np.sin(theta)
 
-df = pd.DataFrame({
-    "x": x,
-    "y": y,
-    "idx": indices,
-    "rand": np.random.randn(num_points),
-})
+for message in ss.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-st.altair_chart(alt.Chart(df, height=700, width=700)
-    .mark_point(filled=True)
-    .encode(
-        x=alt.X("x", axis=None),
-        y=alt.Y("y", axis=None),
-        color=alt.Color("idx", legend=None, scale=alt.Scale()),
-        size=alt.Size("rand", legend=None, scale=alt.Scale(range=[1, 150])),
-    ))
+# prompt user
+if prompt := st.chat_input("What is up?"):
+    ss.messages.append({"role": "user", "content": prompt})
+
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    msg_history = [
+        {"role": m["role"], "content": m["content"]} for m in ss.messages
+    ]
+
+    ss.stream = client.beta.threads.create_and_run(
+        assistant_id="asst_WmMWULv2th1lucLFeq4aAvHe",
+        thread={
+            "messages": msg_history
+        },
+        stream=True
+    )
+
+    with st.chat_message("assistant"):
+        response = st.write_stream(data_streamer)
+        ss.messages.append({"role": "assistant", "content": response})
